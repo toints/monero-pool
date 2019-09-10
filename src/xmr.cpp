@@ -79,6 +79,8 @@ int parse_address(const char *input, uint64_t *prefix,
 {
     uint64_t tag;
     std::string decoded;
+		std::string str_input = input;
+		str_input = str_input.substr(0,95);
     bool rv = tools::base58::decode_addr(input, tag, decoded);
     if (rv)
     {
@@ -108,7 +110,7 @@ void get_hash(const unsigned char *input, const size_t in_size,
         unsigned char *output, int variant, uint64_t height)
 {
     cn_slow_hash(input, in_size,
-            reinterpret_cast<hash&>(*output), variant, height);
+            reinterpret_cast<hash&>(*output), variant);//, height);
 }
 
 void get_rx_hash(const unsigned char *input, const size_t in_size,

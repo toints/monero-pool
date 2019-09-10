@@ -1253,7 +1253,7 @@ response_to_block_template(json_object *result,
 
     unsigned int major_version = 0;
     sscanf(block_template->blocktemplate_blob, "%2x", &major_version);
-    uint8_t pow_variant = major_version >= 7 ? major_version - 6 : 0;
+    uint8_t pow_variant = 0;//major_version >= 7 ? major_version - 6 : 0;
     log_trace("Variant: %u", pow_variant);
 
     if (pow_variant >= 6)
@@ -2159,7 +2159,7 @@ client_on_block_template(json_object *message, client_t *client)
 
     unsigned int major_version = 0;
     sscanf(btb, "%2x", &major_version);
-    uint8_t pow_variant = major_version >= 7 ? major_version - 6 : 0;
+    uint8_t pow_variant = 0;//major_version >= 7 ? major_version - 6 : 0;
     log_trace("Variant: %u", pow_variant);
 
     if (pow_variant >= 6)
@@ -2343,7 +2343,7 @@ client_on_submit(json_object *message, client_t *client)
     unsigned char result_hash[32] = {0};
     unsigned char submitted_hash[32] = {0};
     uint8_t major_version = (uint8_t)block[0];
-    uint8_t pow_variant = major_version >= 7 ? major_version - 6 : 0;
+    uint8_t pow_variant = 0;//major_version >= 7 ? major_version - 6 : 0;
     if (pow_variant >= 6)
     {
         unsigned char seed_hash[32];
