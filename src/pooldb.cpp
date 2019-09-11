@@ -30,13 +30,17 @@ static bool open_db()
 static bool close_db()
 {
 		mysql_close(&s_mysql);
+		return true;
 }
 
 bool add_share_to_db(uint64_t height, uint64_t difficulty, const char* address, uint64_t timestamp)
 {
 	  if(!open_db())
 				return false;
-
+		//INSERT INTO `xmcpool`.`share` (`height`, `difficulty`, `address`, `timestamp`) VALUES ('1', '1', 'rtdgh', '78');
+		std::string sql_prefix = "INSERT INTO `share` (`height`, `difficulty`, `address`, `timestamp`) VALUES";
+		std::string sql_value = "('" + std::to_string(height) + "' , '" +std::to_string(difficulty) + "' , '" + address + "' , '" +std::to_string(timestamp) +"');";
+		std::string sql = sql_prefix + sql_value;
 		close_db();
 		return true;
 }
@@ -45,7 +49,10 @@ bool add_block_to_db(uint64_t height, const char* hash, const char* prehash, uin
 {
 	if(!open_db())
 		return false;
-
+	//INSERT INTO `xmcpool`.`block` (`height`, `hash`, `prevhash`, `difficulty`, `status`, `reward`, `timestamp`) VALUES ('1', 'ada', 'adfa', '12', '1', '32' ,'232');
+	std::string sql_prefix = "INSERT INTO `block` (`height`, `hash`, `prevhash`, `difficulty`, `status`, `reward`, `timestamp`)";
+	std::string sql_value ;
+	std::string sql = sql_prefix + sql_value;
 	close_db();
 	return true;
 }
