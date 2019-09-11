@@ -67,6 +67,7 @@ developers.
 #include "xmr.h"
 #include "log.h"
 #include "webui.h"
+#include "pooldb.h"
 
 #define MAX_LINE 8192
 #define POOL_CLIENTS_GROW 1024
@@ -449,6 +450,8 @@ store_share(uint64_t height, share_t *share)
     mdb_cursor_put(cursor, &key, &val, MDB_APPENDDUP);
 
     rc = mdb_txn_commit(txn);
+		uint64_t timestamp = share->timestamp;
+		add_share_to_db(share->height, share->difficulty, share->address, timestamp);
     return rc;
 }
 
@@ -476,7 +479,8 @@ store_block(uint64_t height, block_t *block)
     MDB_val key = { sizeof(height), (void*)&height };
     MDB_val val = { sizeof(block_t), (void*)block };
     mdb_cursor_put(cursor, &key, &val, MDB_APPENDDUP);
-
+		uint64_t timestamp = block->timestamp;
+		add_block_to_db(block->height, block->hash, block->prev_hash, block->difficulty, block->status, block->reward, timestamp);
     rc = mdb_txn_commit(txn);
     return rc;
 }
