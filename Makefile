@@ -105,12 +105,14 @@ ifeq ($(OS), Darwin)
   LIBS += c++ \
 	  boost_system-mt boost_date_time-mt boost_chrono-mt \
 	  boost_filesystem-mt boost_thread-mt boost_regex-mt \
-	  boost_serialization-mt boost_program_options-mt
+	  boost_serialization-mt boost_program_options-mt    \
+		mysqlclient
 else
   LIBS += dl uuid \
 	  boost_system boost_date_time boost_chrono \
 	  boost_filesystem boost_thread boost_regex \
-	  boost_serialization boost_program_options
+	  boost_serialization boost_program_options \
+		mysqlclient
 endif
 
 PKG_LIBS := $(shell pkg-config \
