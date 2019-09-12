@@ -53,13 +53,17 @@ bool add_share_to_db(uint64_t height, uint64_t difficulty, const char* address, 
 		return true;
 }
 
-bool add_block_to_db(uint64_t height, const char* hash, const char* prehash, uint64_t difficulty, uint32_t status, uint64_t reward, uint64_t timestamp)
+bool add_block_to_db(uint64_t height, const char* hash, const char* prevhash, uint64_t difficulty, uint32_t status, uint64_t reward, uint64_t timestamp)
 {
 	if(!open_db())
 		return false;
 	//INSERT INTO `xmcpool`.`block` (`height`, `hash`, `prevhash`, `difficulty`, `status`, `reward`, `timestamp`) VALUES ('1', 'ada', 'adfa', '12', '1', '32' ,'232');
-	std::string sql_prefix = "INSERT INTO `block` (`height`, `hash`, `prevhash`, `difficulty`, `status`, `reward`, `timestamp`)";
-	std::string sql_value = "('" + std::to_string(height) + "' , '" + hash + "' , '" + prehash + "' , '" + std::to_string(difficulty) + "' , '" + std::to_string(status) + "' , '" + std::to_string(reward) + "' , '" +  "');";
+	std::string sql_prefix = "INSERT INTO `block` (`height`, `hash`, `prevhash`, `difficulty`, `status`, `reward`, `timestamp`) VALUES ";
+	std::string str_hash = hash;
+	str_hash = str_hash.substr(0,128);
+	std::string str_prevhash = prevhash;
+	str_prevhash = str_prevhash.substr(0,64);
+	std::string sql_value = "('" + std::to_string(height) + "' , '" + str_hash + "' , '" + str_prevhash + "' , '" + std::to_string(difficulty) + "' , '" + std::to_string(status) + "' , '" + std::to_string(reward) + "' , '" + std::to_string(timestamp) +  "');";
 	std::string sql = sql_prefix + sql_value;
 	int ret = mysql_real_query(&s_mysql, sql.c_str(), strlen(sql.c_str()));
   if (ret != 0)
