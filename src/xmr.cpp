@@ -50,6 +50,7 @@ developers.
 #include "common/base58.h"
 #include "common/util.h"
 #include "string_tools.h"
+#include <boost/algorithm/hex.hpp>
 
 #include "xmr.h"
 
@@ -72,6 +73,23 @@ int get_hashing_blob(const unsigned char *input, const size_t in_size,
     *output = (unsigned char*) malloc(*out_size);
     memcpy(*output, blob.data(), *out_size);
     return XMR_NO_ERROR;
+}
+
+int get_hashing_blob_xsv(const unsigned char *input, const size_t in_size,
+			unsigned char **output, size_t *out_size)
+{
+		blobdata blob = std::string((const char*)input, in_size);
+		blob = blob.substr(0,43);	
+		std::string  hex_prev_id = "96574130e55a7516f035988127c510ddcd28433de9a65b877fd21565be25d22c";
+		std::string bin_prev_id = boost::algorithm::unhex(hex_prev_id);	
+	  blob.append(bin_prev_id);
+		uint32_t tx_size = 1;
+		blob.append(tools::get_varint_data(tx_size));
+
+		*out_size = blob.length();
+		*output = (unsigned char*) malloc(*out_size);
+		memcpy(*output, blob.data(), *out_size);
+		return XMR_NO_ERROR;
 }
 
 int parse_address(const char *input, uint64_t *prefix,
@@ -106,10 +124,37 @@ int get_block_hash(const unsigned char *input, const size_t in_size,
     return rv ? XMR_NO_ERROR : XMR_PARSE_ERROR;
 }
 
+int get_block_hash_xsv(const unsigned char *input, const size_t in_size, unsigned char *output)
+{
+		blobdata blob = std::string((const char*)input, in_size);
+		std::cout << "hex data: \n" <<  boost::algorithm::hex(blob) << std::endl;	
+
+		hash proof_hash ;
+		cn_slow_hash(input, in_size, proof_hash, 0);
+
+		if ( cryptonote::check_hash(proof_hash, 1000))
+    {
+			std::cout << "check OK !" << std::endl;
+    }
+	
+
+	  cn_slow_hash(input, in_size,
+            reinterpret_cast<hash&>(*output), 0);
+}
+
 void get_hash(const unsigned char *input, const size_t in_size,
         unsigned char *output, int variant, uint64_t height)
 {
+		hash proof_hash ;
+		cn_slow_hash(input, in_size, proof_hash, 0);
+
+		if ( cryptonote::check_hash(proof_hash, 1000))
+    {
+			std::cout << "check OK !" << std::endl;
+    }
+	
     cn_slow_hash(input, in_size,
+
             reinterpret_cast<hash&>(*output), variant);//, height);
 }
 
