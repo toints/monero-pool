@@ -24,8 +24,9 @@ CREATE TABLE IF NOT EXISTS `block` (
   `prevhash` varchar(64) DEFAULT NULL,
   `difficulty` bigint(20) DEFAULT NULL,
   `status` int(11) DEFAULT NULL,
-  `reward` int(11) DEFAULT NULL,
+  `reward` int(11) DEFAULT NULL ,
   `timestamp` bigint(20) DEFAULT NULL,
+	`name` varchar(50) DEFAULT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
@@ -37,6 +38,7 @@ CREATE TABLE IF NOT EXISTS `share` (
   `difficulty` bigint(20) DEFAULT NULL,
   `address` varchar(100) DEFAULT NULL,
   `timestamp` bigint(20) DEFAULT NULL,
+	`name` varchar(50) DEFAULT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
