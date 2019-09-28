@@ -3,11 +3,13 @@
 #include <iostream>
 #include <mysql/mysql.h>
 #include <string.h>
+#include <vector>
 static MYSQL s_mysql;
 static std::string s_url = "192.168.0.68";
 static std::string s_db_user = "root";
 static std::string s_db_pass = "a";
 static std::string s_db_name = "xmcpool";
+static std::vector<std::string> s_vect_sql;
 
 static bool open_db()
 {
@@ -32,6 +34,20 @@ static bool close_db()
 {
 		mysql_close(&s_mysql);
 		return true;
+}
+
+static bool batch_flush(const std::vector<std::string>& vect_sql)
+{
+		open_db();
+    mysql_query(&s_mysql,"START TRANSACTION");
+		std::string sql;
+    for(uint32_t i = 0; i < vect_sql.size(); i ++)
+    {
+				sql = vect_sql[i];
+			  mysql_real_query(&s_mysql, sql.c_str(), strlen(sql.c_str()));      	
+    }
+    mysql_query(&s_mysql,"COMMIT");
+		close_db();
 }
 
 bool add_share_to_db(uint64_t height, uint64_t difficulty, const char* address, uint64_t timestamp)
