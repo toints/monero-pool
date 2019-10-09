@@ -56,7 +56,7 @@ bool add_share_to_db(uint64_t height, uint64_t difficulty, const char* address, 
 				return false;
 		//INSERT INTO `xmcpool`.`share` (`height`, `difficulty`, `address`, `timestamp`) VALUES ('1', '1', 'rtdgh', '78');
 		std::string sql_prefix = "INSERT INTO `share` (`height`, `difficulty`, `address`, `timestamp`, `name`) VALUES";
-		std::string sql_value = "('" + std::to_string(height) + "' , '" +std::to_string(difficulty) + "' , '" + address + "' , '" +std::to_string(timestamp) +"' , 'XMC');";
+		std::string sql_value = "('" + std::to_string(height) + "' , '" +std::to_string(difficulty) + "' , '" + address + "' , '" +std::to_string(timestamp) +"' , 'XSV');";
 		std::string sql = sql_prefix + sql_value;
 		int ret = mysql_real_query(&s_mysql, sql.c_str(), strlen(sql.c_str()));
     if (ret != 0)
@@ -79,7 +79,7 @@ bool add_block_to_db(uint64_t height, const char* hash, const char* prevhash, ui
 	str_hash = str_hash.substr(0,128);
 	std::string str_prevhash = prevhash;
 	str_prevhash = str_prevhash.substr(0,64);
-	std::string sql_value = "('" + std::to_string(height) + "' , '" + str_hash + "' , '" + str_prevhash + "' , '" + std::to_string(difficulty) + "' , '" + std::to_string(status) + "' , '" + std::to_string(reward) + "' , '" + std::to_string(timestamp) +  "', 'XMC');";
+	std::string sql_value = "('" + std::to_string(height) + "' , '" + str_hash + "' , '" + str_prevhash + "' , '" + std::to_string(difficulty) + "' , '" + std::to_string(status) + "' , '" + std::to_string(reward) + "' , '" + std::to_string(timestamp) +  "', 'XSV');";
 	std::string sql = sql_prefix + sql_value;
 	int ret = mysql_real_query(&s_mysql, sql.c_str(), strlen(sql.c_str()));
   if (ret != 0)

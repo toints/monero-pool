@@ -84,7 +84,7 @@ developers.
 #define DB_SIZE 0x140000000 /* 5G */
 #define DB_COUNT_MAX 10
 #define MAX_PATH 1024
-#define RPC_PATH ""
+#define RPC_PATH "/json_rpc"
 #define ADDRESS_MAX 128
 #define BLOCK_TIME 120
 #define HR_BLOCK_COUNT 5
@@ -479,9 +479,11 @@ store_block(uint64_t height, block_t *block)
     MDB_val key = { sizeof(height), (void*)&height };
     MDB_val val = { sizeof(block_t), (void*)block };
     mdb_cursor_put(cursor, &key, &val, MDB_APPENDDUP);
+
+    rc = mdb_txn_commit(txn);
+
 		uint64_t timestamp = block->timestamp;
 		add_block_to_db(block->height, block->hash, block->prev_hash, block->difficulty, block->status, block->reward, timestamp);
-    rc = mdb_txn_commit(txn);
     return rc;
 }
 
@@ -1163,7 +1165,7 @@ client_send_job(client_t *client, bool response)
     /* Get hashong blob */
     size_t hashing_blob_size;
     unsigned char *hashing_blob = NULL;
-    get_hashing_blob_xsv(block, bin_size, &hashing_blob, &hashing_blob_size);
+    get_hashing_blob(block, bin_size, &hashing_blob, &hashing_blob_size);
 
     /* Make hex */
     job->blob = calloc((hashing_blob_size << 1) +1, sizeof(char));
@@ -1240,22 +1242,24 @@ static void
 response_to_block_template(json_object *result,
         block_template_t *block_template)
 {
- //   JSON_GET_OR_WARN(blockhashing_blob, result, json_type_string);
+    JSON_GET_OR_WARN(blockhashing_blob, result, json_type_string);
     JSON_GET_OR_WARN(blocktemplate_blob, result, json_type_string);
     JSON_GET_OR_WARN(difficulty, result, json_type_int);
     JSON_GET_OR_WARN(height, result, json_type_int);
-    JSON_GET_OR_WARN(previousblockhash, result, json_type_string);
+    JSON_GET_OR_WARN(prev_hash, result, json_type_string);
     JSON_GET_OR_WARN(reserved_offset, result, json_type_int);
-//    block_template->blockhashing_blob = strdup(json_object_get_string(blockhashing_blob));
-    block_template->blocktemplate_blob = strdup(json_object_get_string(blocktemplate_blob));
+    block_template->blockhashing_blob = strdup(
+            json_object_get_string(blockhashing_blob));
+    block_template->blocktemplate_blob = strdup(
+            json_object_get_string(blocktemplate_blob));
     block_template->difficulty = json_object_get_int64(difficulty);
     block_template->height = json_object_get_int64(height);
-    memcpy(block_template->prev_hash, json_object_get_string(previousblockhash), 64);
+    memcpy(block_template->prev_hash, json_object_get_string(prev_hash), 64);
     block_template->reserved_offset = json_object_get_int(reserved_offset);
 
-    //unsigned int major_version = 0;
-    //sscanf(block_template->blocktemplate_blob, "%2x", &major_version);
-    uint8_t pow_variant = 0;//major_version >= 7 ? major_version - 6 : 0;
+    unsigned int major_version = 0;
+    sscanf(block_template->blocktemplate_blob, "%2x", &major_version);
+    uint8_t pow_variant = 0;// major_version >= 7 ? major_version - 6 : 0;
     log_trace("Variant: %u", pow_variant);
 
     if (pow_variant >= 6)
@@ -1306,7 +1310,7 @@ rpc_on_response(struct evhttp_request *req, void *arg)
     }
 
     int rc = evhttp_request_get_response_code(req);
-    if (/*rc < 200 ||*/ rc >= 300)
+    if (rc < 200 || rc >= 300)
     {
         log_error("HTTP status code %d for %s. Aborting.",
                 rc, evhttp_request_get_uri(req));
@@ -1341,8 +1345,7 @@ rpc_request(struct event_base *base, const char *body, rpc_callback_t *callback)
     headers = evhttp_request_get_output_headers(req);
     evhttp_add_header(headers, "Content-Type", "application/json");
     evhttp_add_header(headers, "Connection", "close");
-		evhttp_add_header(headers, "authorization", "Basic ZGV2OmE=");
-    evhttp_make_request(con, req, EVHTTP_REQ_POST, "/");//RPC_PATH);
+    evhttp_make_request(con, req, EVHTTP_REQ_POST, RPC_PATH);
 }
 
 static void
@@ -1491,8 +1494,8 @@ rpc_on_block_template(const char* data, rpc_callback_t *callback)
     log_trace("Got block template: \n%s", data);
     json_object *root = json_tokener_parse(data);
     JSON_GET_OR_WARN(result, root, json_type_object);
-    //JSON_GET_OR_WARN(status, result, json_type_string);
-    //const char *ss = json_object_get_string(status);
+    JSON_GET_OR_WARN(status, result, json_type_string);
+    const char *ss = json_object_get_string(status);
     json_object *error = NULL;
     json_object_object_get_ex(root, "error", &error);
     if (error)
@@ -1505,12 +1508,12 @@ rpc_on_block_template(const char* data, rpc_callback_t *callback)
         json_object_put(root);
         return;
     }
-    /*if (!status || strcmp(ss, "OK") != 0)
+    if (!status || strcmp(ss, "OK") != 0)
     {
         log_error("Error getting block template: %s", ss);
         json_object_put(root);
         return;
-    }*/
+    }
     pool_stats.last_template_fetched = time(NULL);
     block_template_t *front = (block_template_t*) bstack_push(bst, NULL);
     response_to_block_template(result, front);
@@ -1615,9 +1618,9 @@ rpc_on_last_block_header(const char* data, rpc_callback_t *callback)
     log_trace("Got last block header: \n%s", data);
     json_object *root = json_tokener_parse(data);
     JSON_GET_OR_WARN(result, root, json_type_object);
-/*JSON_GET_OR_WARN(status, result, json_type_string);
+    JSON_GET_OR_WARN(status, result, json_type_string);
     const char *ss = json_object_get_string(status);
-*/  json_object *error = NULL;
+    json_object *error = NULL;
     json_object_object_get_ex(root, "error", &error);
     if (error)
     {
@@ -1629,44 +1632,28 @@ rpc_on_last_block_header(const char* data, rpc_callback_t *callback)
         json_object_put(root);
         return;
     }
-/*    if (!status || strcmp(ss, "OK") != 0)
+    if (!status || strcmp(ss, "OK") != 0)
     {
         log_error("Error getting last block header: %s", ss);
         json_object_put(root);
         return;
     }
-*/
-/*    JSON_GET_OR_WARN(block_header, result, json_type_object);
-    JSON_GET_OR_WARN(height, block_header, json_type_int);*/
-		JSON_GET_OR_WARN(headers, result, json_type_int);
-    uint64_t bh = json_object_get_int64(headers);
+
+    JSON_GET_OR_WARN(block_header, result, json_type_object);
+    JSON_GET_OR_WARN(height, block_header, json_type_int);
+    uint64_t bh = json_object_get_int64(height);
     bool need_new_template = false;
     block_t *front = bstack_peek(bsh);
     if (front && bh > front->height)
     {
         need_new_template = true;
         block_t *block = bstack_push(bsh, NULL);
-        //response_to_block(block_header, block);
-				memset(block, 0, sizeof(block_t));
-				JSON_GET_OR_WARN(bestblockhash, result, json_type_string);
-				JSON_GET_OR_WARN(mediantime, result, json_type_int);
-				block->height = headers;//json_object_get_int64(height);
-				block->difficulty = 1000;//json_object_get_int64(difficulty);
-				memcpy(block->hash, json_object_get_string(bestblockhash), 64);
-				block->timestamp = json_object_get_int64(mediantime);
-
+        response_to_block(block_header, block);
     }
     else if (!front)
     {
         block_t *block = bstack_push(bsh, NULL);
-        //response_to_block(block_header, block);
-				memset(block, 0, sizeof(block_t));
-				JSON_GET_OR_WARN(bestblockhash, result, json_type_string);
-				JSON_GET_OR_WARN(mediantime, result, json_type_int);
-				block->height = headers;//json_object_get_int64(height);
-				block->difficulty = 1000;//json_object_get_int64(difficulty);
-				memcpy(block->hash, json_object_get_string(bestblockhash), 64);
-				block->timestamp = json_object_get_int64(mediantime);
+        response_to_block(block_header, block);
         startup_pauout(block->height);
         need_new_template = true;
     }
@@ -1682,16 +1669,18 @@ rpc_on_last_block_header(const char* data, rpc_callback_t *callback)
         log_info("Fetching new block template");
         char body[RPC_BODY_MAX];
         uint64_t reserve = 17;
-        rpc_get_request_body(body, "getblocktemplatecn", NULL);
+        rpc_get_request_body(body, "get_block_template", "sssd",
+                "wallet_address", config.pool_wallet, "reserve_size", reserve);
         rpc_callback_t *cb1 = rpc_callback_new(rpc_on_block_template, NULL);
         rpc_request(base, body, cb1);
-				
-        /*uint64_t end = front->height - 60;
+
+        uint64_t end = front->height - 60;
         uint64_t start = end - BLOCK_HEADERS_RANGE + 1;
         rpc_get_request_body(body, "get_block_headers_range", "sdsd",
                 "start_height", start, "end_height", end);
-        rpc_callback_t *cb2 = rpc_callback_new(rpc_on_block_headers_range, NULL);
-        rpc_request(base, body, cb2);*/
+        rpc_callback_t *cb2 = rpc_callback_new(
+                rpc_on_block_headers_range, NULL);
+        rpc_request(base, body, cb2);
     }
 
     json_object_put(root);
@@ -1700,8 +1689,7 @@ rpc_on_last_block_header(const char* data, rpc_callback_t *callback)
 static void
 rpc_on_block_submitted(const char* data, rpc_callback_t *callback)
 {
-    log_info(data);
-	  json_object *root = json_tokener_parse(data);
+    json_object *root = json_tokener_parse(data);
     JSON_GET_OR_WARN(result, root, json_type_object);
     JSON_GET_OR_WARN(status, result, json_type_string);
     const char *ss = json_object_get_string(status);
@@ -1965,7 +1953,7 @@ fetch_last_block_header(void)
 {
     log_info("Fetching last block header");
     char body[RPC_BODY_MAX];
-    rpc_get_request_body(body, "getblockchaininfo", NULL);
+    rpc_get_request_body(body, "get_last_block_header", NULL);
     rpc_callback_t *cb = rpc_callback_new(rpc_on_last_block_header, NULL);
     rpc_request(base, body, cb);
 }
@@ -2346,7 +2334,7 @@ client_on_submit(json_object *message, client_t *client)
     /* Get hashong blob */
     size_t hashing_blob_size;
     unsigned char *hashing_blob = NULL;
-    if (get_hashing_blob_xsv(block, bin_size,
+    if (get_hashing_blob(block, bin_size,
                 &hashing_blob, &hashing_blob_size) != 0)
     {
         char body[ERROR_BODY_MAX];
@@ -2361,7 +2349,7 @@ client_on_submit(json_object *message, client_t *client)
     unsigned char result_hash[32] = {0};
     unsigned char submitted_hash[32] = {0};
     uint8_t major_version = (uint8_t)block[0];
-    uint8_t pow_variant = 0;//major_version >= 7 ? major_version - 6 : 0;
+    uint8_t pow_variant = 0; //major_version >= 7 ? major_version - 6 : 0;
     if (pow_variant >= 6)
     {
         unsigned char seed_hash[32];
@@ -2416,16 +2404,15 @@ client_on_submit(json_object *message, client_t *client)
         char body[RPC_BODY_MAX];
         snprintf(body, RPC_BODY_MAX,
                 "{\"jsonrpc\":\"2.0\",\"id\":\"0\",\"method\":"
-                "\"submitblockcn\", \"params\":[\"%s\"]}",
+                "\"submit_block\", \"params\":[\"%s\"]}",
                 block_hex);
-				log_info(block_hex);
 
         rpc_callback_t *cb = rpc_callback_new(rpc_on_block_submitted, NULL);
         cb->data = calloc(1, sizeof(block_t));
         block_t* b = (block_t*) cb->data;
         b->height = bt->height;
         unsigned char block_hash[32] = {0};
-        if (get_block_hash_xsv(block, bin_size, block_hash) != 0)
+        if (get_block_hash(block, bin_size, block_hash) != 0)
             log_error("Error getting block hash!");
         bin_to_hex(block_hash, 32, b->hash, 64);
         memcpy(b->prev_hash, bt->prev_hash, 64);
@@ -2859,7 +2846,7 @@ run(void)
     else
         fetch_last_block_header();
 
-    //fetch_view_key();
+    fetch_view_key();
 
     timer_10m = evtimer_new(base, timer_on_10m, NULL);
     timer_on_10m(-1, EV_TIMEOUT, NULL);

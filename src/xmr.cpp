@@ -50,7 +50,6 @@ developers.
 #include "common/base58.h"
 #include "common/util.h"
 #include "string_tools.h"
-#include <boost/algorithm/hex.hpp>
 
 #include "xmr.h"
 
@@ -75,30 +74,11 @@ int get_hashing_blob(const unsigned char *input, const size_t in_size,
     return XMR_NO_ERROR;
 }
 
-int get_hashing_blob_xsv(const unsigned char *input, const size_t in_size,
-			unsigned char **output, size_t *out_size)
-{
-		blobdata blob = std::string((const char*)input, in_size);
-		blob = blob.substr(0,43);	
-		std::string  hex_prev_id = "96574130e55a7516f035988127c510ddcd28433de9a65b877fd21565be25d22c";
-		std::string bin_prev_id = boost::algorithm::unhex(hex_prev_id);	
-	  blob.append(bin_prev_id);
-		uint32_t tx_size = 1;
-		blob.append(tools::get_varint_data(tx_size));
-
-		*out_size = blob.length();
-		*output = (unsigned char*) malloc(*out_size);
-		memcpy(*output, blob.data(), *out_size);
-		return XMR_NO_ERROR;
-}
-
 int parse_address(const char *input, uint64_t *prefix,
         unsigned char *pub_spend)
 {
     uint64_t tag;
     std::string decoded;
-		std::string str_input = input;
-		str_input = str_input.substr(0,95);
     bool rv = tools::base58::decode_addr(input, tag, decoded);
     if (rv)
     {
@@ -124,37 +104,10 @@ int get_block_hash(const unsigned char *input, const size_t in_size,
     return rv ? XMR_NO_ERROR : XMR_PARSE_ERROR;
 }
 
-int get_block_hash_xsv(const unsigned char *input, const size_t in_size, unsigned char *output)
-{
-		blobdata blob = std::string((const char*)input, in_size);
-		std::cout << "hex data: \n" <<  boost::algorithm::hex(blob) << std::endl;	
-
-		hash proof_hash ;
-		cn_slow_hash(input, in_size, proof_hash, 0);
-
-		if ( cryptonote::check_hash(proof_hash, 1000))
-    {
-			std::cout << "check OK !" << std::endl;
-    }
-	
-
-	  cn_slow_hash(input, in_size,
-            reinterpret_cast<hash&>(*output), 0);
-}
-
 void get_hash(const unsigned char *input, const size_t in_size,
         unsigned char *output, int variant, uint64_t height)
 {
-		hash proof_hash ;
-		cn_slow_hash(input, in_size, proof_hash, 0);
-
-		if ( cryptonote::check_hash(proof_hash, 1000))
-    {
-			std::cout << "check OK !" << std::endl;
-    }
-	
     cn_slow_hash(input, in_size,
-
             reinterpret_cast<hash&>(*output), variant);//, height);
 }
 
@@ -163,13 +116,10 @@ void get_rx_hash(const unsigned char *input, const size_t in_size,
         const uint64_t height)
 {
 #ifdef HAVE_RX
-    static unsigned max_concurrency = tools::get_max_concurrency();
-    uint64_t seed_height;
-    if (rx_needhash(height, &seed_height, max_concurrency))
-    {
-        rx_seedhash(seed_height, (const char*)seed_hash, max_concurrency);
-    }
-    rx_slow_hash((const char*)input, in_size, (char*)output, max_concurrency);
+    static unsigned miners = tools::get_max_concurrency();
+    uint64_t seed_height = rx_seedheight(height);
+    rx_slow_hash(height, seed_height, (const char*)seed_hash,
+            (const char*)input, in_size, (char*)output, miners, 0);
 #endif
 }
 
@@ -183,10 +133,8 @@ int validate_block_from_blob(const char *blob_hex,
     */
     block b = AUTO_VAL_INIT(b);
     blobdata bd;
-    secret_key v;
-    public_key S;
-    memcpy(&unwrap(v), sec_view, 32);
-    memcpy(&S, pub_spend, 32);
+    const secret_key &v = *reinterpret_cast<const secret_key*>(sec_view);
+    const public_key &S = *reinterpret_cast<const public_key*>(pub_spend);
 
     if (!parse_hexstr_to_binbuff(blob_hex, bd))
         return XMR_PARSE_ERROR;
