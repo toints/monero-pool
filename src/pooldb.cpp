@@ -46,6 +46,7 @@ bool batch_sql()
 				sql = s_vect_sql[i];
 			  mysql_real_query(&s_mysql, sql.c_str(), strlen(sql.c_str()));      	
     }
+		s_vect_sql.clear();
     mysql_query(&s_mysql,"COMMIT");
 		close_db();
 	
