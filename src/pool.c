@@ -209,13 +209,6 @@ typedef struct block_t
     time_t timestamp;
 } block_t;
 
-typedef struct payment_t
-{
-    uint64_t amount;
-    time_t timestamp;
-    char address[ADDRESS_MAX];
-} payment_t;
-
 typedef struct rpc_callback_t rpc_callback_t;
 typedef void (*rpc_callback_fun)(const char*, rpc_callback_t*);
 struct rpc_callback_t
@@ -231,16 +224,11 @@ static bstack_t *bsh;
 static struct event_base *base;
 static struct event *listener_event;
 static struct event *timer_120s;
-static struct event *timer_10m;
+static struct event *timer_1m;
 static struct event *signal_usr1;
 static uint32_t extra_nonce;
 static uint32_t instance_id;
 static block_t block_headers_range[BLOCK_HEADERS_RANGE];
-static MDB_env *env;
-static MDB_dbi db_shares;
-static MDB_dbi db_blocks;
-static MDB_dbi db_balance;
-static MDB_dbi db_payments;
 static BN_CTX *bn_ctx;
 static BIGNUM *base_diff;
 static pool_stats_t pool_stats;
@@ -298,193 +286,19 @@ rpc_callback_free(rpc_callback_t *callback)
 }
 
 static int
-compare_uint64(const MDB_val *a, const MDB_val *b)
-{
-    const uint64_t va = *(const uint64_t *)a->mv_data;
-    const uint64_t vb = *(const uint64_t *)b->mv_data;
-    return (va < vb) ? -1 : va > vb;
-}
-
-static int
-compare_string(const MDB_val *a, const MDB_val *b)
-{
-    const char *va = (const char*) a->mv_data;
-    const char *vb = (const char*) b->mv_data;
-    return strcmp(va, vb);
-}
-
-static int
-compare_block(const MDB_val *a, const MDB_val *b)
-{
-    const block_t *va = (const block_t*) a->mv_data;
-    const block_t *vb = (const block_t*) b->mv_data;
-    int sc = memcmp(va->hash, vb->hash, 64);
-    if (sc == 0)
-        return (va->timestamp < vb->timestamp) ? -1 :
-            va->timestamp > vb->timestamp;
-    else
-        return sc;
-}
-
-static int
-compare_share(const MDB_val *a, const MDB_val *b)
-{
-    const share_t *va = (const share_t*) a->mv_data;
-    const share_t *vb = (const share_t*) b->mv_data;
-    int sc = strcmp(va->address, vb->address);
-    if (sc == 0)
-        return (va->timestamp < vb->timestamp) ? -1 :
-            va->timestamp > vb->timestamp;
-    else
-        return sc;
-}
-
-static int
-compare_payment(const MDB_val *a, const MDB_val *b)
-{
-    const payment_t *va = (const payment_t*) a->mv_data;
-    const payment_t *vb = (const payment_t*) b->mv_data;
-    return (va->timestamp < vb->timestamp) ? -1 :
-        va->timestamp > vb->timestamp;
-}
-
-static int
-database_init(const char* data_dir)
-{
-    int rc;
-    char *err;
-    MDB_txn *txn;
-
-    rc = mdb_env_create(&env);
-    mdb_env_set_maxdbs(env, (MDB_dbi) DB_COUNT_MAX);
-    mdb_env_set_mapsize(env, DB_SIZE);
-    if ((rc = mdb_env_open(env, data_dir, 0, 0664)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_fatal("%s\n", err);
-        exit(rc);
-    }
-    if ((rc = mdb_txn_begin(env, NULL, 0, &txn)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_fatal("%s\n", err);
-        exit(rc);
-    }
-    uint32_t flags = MDB_INTEGERKEY | MDB_CREATE | MDB_DUPSORT | MDB_DUPFIXED;
-    if ((rc = mdb_dbi_open(txn, "shares", flags, &db_shares)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_fatal("%s\n", err);
-        exit(rc);
-    }
-    if ((rc = mdb_dbi_open(txn, "blocks", flags, &db_blocks)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_fatal("%s\n", err);
-        exit(rc);
-    }
-    flags = MDB_CREATE | MDB_DUPSORT | MDB_DUPFIXED;
-    if ((rc = mdb_dbi_open(txn, "payments", flags, &db_payments)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_fatal("%s\n", err);
-        exit(rc);
-    }
-    flags = MDB_CREATE;
-    if ((rc = mdb_dbi_open(txn, "balance", flags, &db_balance)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_fatal("%s\n", err);
-        exit(rc);
-    }
-
-    mdb_set_compare(txn, db_shares, compare_uint64);
-    mdb_set_dupsort(txn, db_shares, compare_share);
-
-    mdb_set_compare(txn, db_blocks, compare_uint64);
-    mdb_set_dupsort(txn, db_blocks, compare_block);
-
-    mdb_set_compare(txn, db_payments, compare_string);
-    mdb_set_dupsort(txn, db_payments, compare_payment);
-
-    mdb_set_compare(txn, db_balance, compare_string);
-
-    rc = mdb_txn_commit(txn);
-    return rc;
-}
-
-static void
-database_close(void)
-{
-    log_info("Closing database");
-    mdb_dbi_close(env, db_shares);
-    mdb_dbi_close(env, db_blocks);
-    mdb_dbi_close(env, db_balance);
-    mdb_dbi_close(env, db_payments);
-    mdb_env_close(env);
-}
-
-static int
 store_share(uint64_t height, share_t *share)
 {
-    int rc;
-    char *err;
-    MDB_txn *txn;
-    MDB_cursor *cursor;
-    if ((rc = mdb_txn_begin(env, NULL, 0, &txn)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        return rc;
-    }
-    if ((rc = mdb_cursor_open(txn, db_shares, &cursor)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        mdb_txn_abort(txn);
-        return rc;
-    }
-
-    MDB_val key = { sizeof(height), (void*)&height };
-    MDB_val val = { sizeof(share_t), (void*)share };
-    mdb_cursor_put(cursor, &key, &val, MDB_APPENDDUP);
-
-    rc = mdb_txn_commit(txn);
 		uint64_t timestamp = share->timestamp;
 		add_share_to_db(share->height, share->difficulty, share->address, timestamp);
-    return rc;
+    return 0;
 }
 
 static int
 store_block(uint64_t height, block_t *block)
 {
-    int rc;
-    char *err;
-    MDB_txn *txn;
-    MDB_cursor *cursor;
-    if ((rc = mdb_txn_begin(env, NULL, 0, &txn)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        return rc;
-    }
-    if ((rc = mdb_cursor_open(txn, db_blocks, &cursor)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        mdb_txn_abort(txn);
-        return rc;
-    }
-
-    MDB_val key = { sizeof(height), (void*)&height };
-    MDB_val val = { sizeof(block_t), (void*)block };
-    mdb_cursor_put(cursor, &key, &val, MDB_APPENDDUP);
-
-    rc = mdb_txn_commit(txn);
-
-		uint64_t timestamp = block->timestamp;
+    uint64_t timestamp = block->timestamp;
 		add_block_to_db(block->height, block->hash, block->prev_hash, block->difficulty, block->status, block->reward, timestamp);
-    return rc;
+    return 0;
 }
 
 uint64_t
@@ -509,295 +323,10 @@ miner_hr(const char *address)
     return hr;
 }
 
-uint64_t
-miner_balance(const char *address)
-{
-    if (strlen(address) > ADDRESS_MAX)
-        return 0;
-    int rc;
-    char *err;
-    MDB_txn *txn;
-    MDB_cursor *cursor;
-    if ((rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        return 0;
-    }
-    if ((rc = mdb_cursor_open(txn, db_balance, &cursor)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        mdb_txn_abort(txn);
-        return 0;
-    }
-
-    MDB_val key = {ADDRESS_MAX, (void*)address};
-    MDB_val val;
-    uint64_t balance  = 0;
-
-    rc = mdb_cursor_get(cursor, &key, &val, MDB_SET);
-    if (rc != 0 && rc != MDB_NOTFOUND)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        goto cleanup;
-    }
-    if (rc != 0)
-        goto cleanup;
-
-    balance = *(uint64_t*)val.mv_data;
-
-cleanup:
-    mdb_cursor_close(cursor);
-    mdb_txn_abort(txn);
-    return balance;
-}
-
-static int
-balance_add(const char *address, uint64_t amount, MDB_txn *parent)
-{
-    log_trace("Adding %"PRIu64" to %s's balance", amount, address);
-    int rc;
-    char *err;
-    MDB_txn *txn;
-    MDB_cursor *cursor;
-    if ((rc = mdb_txn_begin(env, parent, 0, &txn)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        return rc;
-    }
-    if ((rc = mdb_cursor_open(txn, db_balance, &cursor)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        mdb_txn_abort(txn);
-        return rc;
-    }
-
-    MDB_val key = {ADDRESS_MAX, (void*)address};
-    MDB_val val;
-    rc = mdb_cursor_get(cursor, &key, &val, MDB_SET);
-    if (rc == MDB_NOTFOUND)
-    {
-        log_trace("Adding new balance entry");
-        MDB_val new_val = { sizeof(amount), (void*)&amount };
-        rc = mdb_cursor_put(cursor, &key, &new_val, 0);
-        if (rc != 0)
-        {
-            err = mdb_strerror(rc);
-            log_error("%s", err);
-        }
-    }
-    else if (rc == 0)
-    {
-        log_trace("Updating existing balance entry");
-        uint64_t current_amount = *(uint64_t*)val.mv_data;
-        current_amount += amount;
-        MDB_val new_val = {sizeof(current_amount), (void*)&current_amount};
-        rc = mdb_cursor_put(cursor, &key, &new_val, MDB_CURRENT);
-        if (rc != 0)
-        {
-            err = mdb_strerror(rc);
-            log_error("%s", err);
-        }
-    }
-    else
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        mdb_txn_abort(txn);
-        return rc;
-    }
-
-    rc = mdb_txn_commit(txn);
-    return rc;
-}
-
-static int
-payout_block(block_t *block, MDB_txn *parent)
-{
-    /*
-      PPLNS
-    */
-    log_info("Payout on block at height %"PRIu64, block->height);
-    int rc;
-    char *err;
-    MDB_txn *txn;
-    MDB_cursor *cursor;
-    uint64_t height = block->height;
-    uint64_t total_paid = 0;
-    if ((rc = mdb_txn_begin(env, parent, 0, &txn)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        return rc;
-    }
-    if ((rc = mdb_cursor_open(txn, db_shares, &cursor)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        mdb_txn_abort(txn);
-        return rc;
-    }
-
-    MDB_cursor_op op = MDB_SET;
-    while (1)
-    {
-        uint64_t current_height = height;
-        MDB_val key = { sizeof(current_height), (void*)&current_height };
-        MDB_val val;
-        rc = mdb_cursor_get(cursor, &key, &val, op);
-        op = MDB_NEXT_DUP;
-        if (rc == MDB_NOTFOUND && total_paid < block->reward)
-        {
-            if (height == 0)
-                break;
-            height--;
-            op = MDB_SET;
-            continue;
-        }
-        if (rc != 0 && rc != MDB_NOTFOUND)
-        {
-            log_error("Error getting balance: %s", mdb_strerror(rc));
-            break;
-        }
-        if (total_paid == block->reward)
-            break;
-
-        share_t *share = (share_t*)val.mv_data;
-        uint64_t amount = floor((double)share->difficulty /
-                ((double)block->difficulty * config.share_mul) * block->reward);
-        if (total_paid + amount > block->reward)
-            amount = block->reward - total_paid;
-        total_paid += amount;
-        uint64_t fee = amount * config.pool_fee;
-        amount -= fee;
-        if (amount == 0)
-            continue;
-        rc = balance_add(share->address, amount, txn);
-        if (rc != 0)
-        {
-            err = mdb_strerror(rc);
-            log_error("%s", err);
-            mdb_cursor_close(cursor);
-            mdb_txn_abort(txn);
-            return rc;
-        }
-    }
-
-    rc = mdb_txn_commit(txn);
-    return rc;
-}
-
-static int
-process_blocks(block_t *blocks, size_t count)
-{
-    log_debug("Processing blocks");
-    /*
-      For each block, lookup block in db.
-      If found, make sure found is locked and not orphaned.
-      If both not orphaned and unlocked, payout, set unlocked.
-      If block heights differ / orphaned, set orphaned.
-    */
-    int rc;
-    char *err;
-    MDB_txn *txn;
-    MDB_cursor *cursor;
-    if ((rc = mdb_txn_begin(env, NULL, 0, &txn)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        return rc;
-    }
-    if ((rc = mdb_cursor_open(txn, db_blocks, &cursor)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        mdb_txn_abort(txn);
-        return rc;
-    }
-
-    for (size_t i=0; i<count; i++)
-    {
-        block_t *ib = &blocks[i];
-        log_trace("Processing block at height %"PRIu64, ib->height);
-        MDB_val key = { sizeof(ib->height), (void*)&ib->height };
-        MDB_val val;
-        MDB_cursor_op op = MDB_SET;
-        while (1)
-        {
-            rc = mdb_cursor_get(cursor, &key, &val, op);
-            op = MDB_NEXT_DUP;
-            if (rc == MDB_NOTFOUND || rc != 0)
-            {
-                log_trace("No stored block at height %"PRIu64, ib->height);
-                if (rc != MDB_NOTFOUND)
-                {
-                    err = mdb_strerror(rc);
-                    log_debug("No stored block at height %"PRIu64
-                            " with error: %d",
-                            ib->height, err);
-                }
-                break;
-            }
-            block_t *sb = (block_t*)val.mv_data;
-            if (sb->status != BLOCK_LOCKED)
-            {
-                continue;
-            }
-            block_t nb;
-            memcpy(&nb, sb, sizeof(block_t));
-            if (memcmp(ib->hash, sb->hash, 64) != 0)
-            {
-                log_trace("Orphaning because hashes differ: %.64s, %.64s",
-                        ib->hash, sb->hash);
-                log_debug("Orphaned block at height %"PRIu64, ib->height);
-                nb.status |= BLOCK_ORPHANED;
-                MDB_val new_val = {sizeof(block_t), (void*)&nb};
-                mdb_cursor_put(cursor, &key, &new_val, MDB_CURRENT);
-                continue;
-            }
-            if (memcmp(ib->prev_hash, sb->prev_hash, 64) != 0)
-            {
-                log_warn("Block with matching height and hash "
-                        "but differing parent! "
-                        "Setting orphaned.\n");
-                nb.status |= BLOCK_ORPHANED;
-                MDB_val new_val = {sizeof(block_t), (void*)&nb};
-                mdb_cursor_put(cursor, &key, &new_val, MDB_CURRENT);
-                continue;
-            }
-            if (ib->status & BLOCK_ORPHANED)
-            {
-                log_debug("Orphaned block at height %"PRIu64, ib->height);
-                nb.status |= BLOCK_ORPHANED;
-                MDB_val new_val = {sizeof(block_t), (void*)&nb};
-                mdb_cursor_put(cursor, &key, &new_val, MDB_CURRENT);
-                continue;
-            }
-            nb.status |= BLOCK_UNLOCKED;
-            nb.reward = ib->reward;
-            rc = payout_block(&nb, txn);
-            if (rc == 0)
-            {
-                log_debug("Paided out block %"PRIu64, nb.height);
-                MDB_val new_val = {sizeof(block_t), (void*)&nb};
-                mdb_cursor_put(cursor, &key, &new_val, MDB_CURRENT);
-            }
-            else
-                log_trace("%s", mdb_strerror(rc));
-        }
-    }
-
-    rc = mdb_txn_commit(txn);
-    return rc;
-}
-
 static void
 update_pool_hr(void)
 {
+		log_trace("update pool hash rate");
     uint64_t hr = 0;
     client_t *c = pool_clients.clients;
     for (size_t i = 0; i < pool_clients.count; i++, c++)
@@ -810,6 +339,7 @@ update_pool_hr(void)
             hr += c->hashes / d;
         }
     }
+		
     pool_stats.pool_hashrate = hr;
 }
 
@@ -1445,7 +975,6 @@ rpc_on_block_header_by_height(const char* data, rpc_callback_t *callback)
     block_t rb;
     JSON_GET_OR_WARN(block_header, result, json_type_object);
     response_to_block(block_header, &rb);
-    process_blocks(&rb, 1);
     json_object_put(root);
 }
 
@@ -1484,7 +1013,6 @@ rpc_on_block_headers_range(const char* data, rpc_callback_t *callback)
         block_t *bh = &block_headers_range[i];
         response_to_block(header, bh);
     }
-    process_blocks(block_headers_range, BLOCK_HEADERS_RANGE);
     json_object_put(root);
 }
 
@@ -1519,71 +1047,6 @@ rpc_on_block_template(const char* data, rpc_callback_t *callback)
     response_to_block_template(result, front);
     pool_clients_send_job();
     json_object_put(root);
-}
-
-static int
-startup_pauout(uint64_t height)
-{
-    /*
-      Loop stored blocks < height - 60
-      If block locked & not orphaned, payout
-    */
-    int rc;
-    char *err;
-    MDB_txn *txn;
-    MDB_cursor *cursor;
-    if ((rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        return rc;
-    }
-    if ((rc = mdb_cursor_open(txn, db_blocks, &cursor)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        mdb_txn_abort(txn);
-        return rc;
-    }
-
-    pool_stats.pool_blocks_found = 0;
-    MDB_cursor_op op = MDB_FIRST;
-    while (1)
-    {
-        MDB_val key;
-        MDB_val val;
-        rc = mdb_cursor_get(cursor, &key, &val, op);
-        op = MDB_NEXT;
-        if (rc != 0 && rc != MDB_NOTFOUND)
-        {
-            err = mdb_strerror(rc);
-            log_error("%s", err);
-            break;
-        }
-        if (rc == MDB_NOTFOUND)
-            break;
-
-        pool_stats.pool_blocks_found++;
-
-        block_t *block = (block_t*)val.mv_data;
-        pool_stats.last_block_found = block->timestamp;
-
-        if (block->height > height - 60)
-            continue;
-        if (block->status != BLOCK_LOCKED)
-            continue;
-
-        char body[RPC_BODY_MAX];
-        rpc_get_request_body(body, "get_block_header_by_height", "sd",
-                "height", block->height);
-        rpc_callback_t *cb = rpc_callback_new(
-                rpc_on_block_header_by_height, NULL);
-        rpc_request(base, body, cb);
-    }
-
-    mdb_cursor_close(cursor);
-    mdb_txn_abort(txn);
-    return 0;
 }
 
 static void
@@ -1654,7 +1117,6 @@ rpc_on_last_block_header(const char* data, rpc_callback_t *callback)
     {
         block_t *block = bstack_push(bsh, NULL);
         response_to_block(block_header, block);
-        startup_pauout(block->height);
         need_new_template = true;
     }
 
@@ -1723,223 +1185,6 @@ rpc_on_block_submitted(const char* data, rpc_callback_t *callback)
 }
 
 static void
-rpc_on_wallet_transferred(const char* data, rpc_callback_t *callback)
-{
-    log_trace("Transfer response: \n%s", data);
-    json_object *root = json_tokener_parse(data);
-    JSON_GET_OR_WARN(result, root, json_type_object);
-    json_object *error = NULL;
-    json_object_object_get_ex(root, "error", &error);
-    if (error)
-    {
-        JSON_GET_OR_WARN(code, error, json_type_object);
-        JSON_GET_OR_WARN(message, error, json_type_string);
-        int ec = json_object_get_int(code);
-        const char *em = json_object_get_string(message);
-        log_error("Error (%d) with wallet transfer: %s", ec, em);
-    }
-    else
-        log_info("Payout transfer successfull");
-
-    int rc;
-    char *err;
-    MDB_txn *txn;
-    MDB_cursor *cursor;
-
-    /* First, updated balance(s) */
-    if ((rc = mdb_txn_begin(env, NULL, 0, &txn)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        goto cleanup;
-    }
-    if ((rc = mdb_cursor_open(txn, db_balance, &cursor)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        mdb_txn_abort(txn);
-        goto cleanup;
-    }
-    payment_t *payment = (payment_t*) callback->data;
-    for (; payment->amount; payment++)
-    {
-        MDB_cursor_op op = MDB_SET;
-        MDB_val key = {ADDRESS_MAX, (void*)payment->address};
-        MDB_val val;
-        rc = mdb_cursor_get(cursor, &key, &val, op);
-        if (rc == MDB_NOTFOUND)
-        {
-            log_error("Payment made to non-existent address");
-            continue;
-        }
-        else if (rc != 0 && rc != MDB_NOTFOUND)
-        {
-            err = mdb_strerror(rc);
-            log_error("%s", err);
-            continue;
-        }
-        uint64_t current_amount = *(uint64_t*)val.mv_data;
-        current_amount -= payment->amount;
-        if (error)
-        {
-            log_warn("Error seen on transfer for %s with amount %"PRIu64,
-                    payment->address, payment->amount);
-        }
-        MDB_val new_val = {sizeof(current_amount), (void*)&current_amount};
-        rc = mdb_cursor_put(cursor, &key, &new_val, MDB_CURRENT);
-        if (rc != 0)
-        {
-            err = mdb_strerror(rc);
-            log_error("%s", err);
-        }
-    }
-    if ((rc = mdb_txn_commit(txn)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("Error committing updated balance(s): %s", err);
-        mdb_txn_abort(txn);
-        goto cleanup;
-    }
-
-    /* Now store payment info */
-    if ((rc = mdb_txn_begin(env, NULL, 0, &txn)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        goto cleanup;
-    }
-    if ((rc = mdb_cursor_open(txn, db_payments, &cursor)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        mdb_txn_abort(txn);
-        goto cleanup;
-    }
-    time_t now = time(NULL);
-    payment = (payment_t*) callback->data;
-    for (; payment->amount; payment++)
-    {
-        payment->timestamp = now;
-        MDB_val key = {ADDRESS_MAX, (void*)payment->address};
-        MDB_val val = {sizeof(payment_t), payment};
-        if ((rc = mdb_cursor_put(cursor, &key, &val, MDB_APPENDDUP)) != 0)
-        {
-            err = mdb_strerror(rc);
-            log_error("Error putting payment: %s", err);
-            continue;
-        }
-    }
-    if ((rc = mdb_txn_commit(txn)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("Error committing payment: %s", err);
-        mdb_txn_abort(txn);
-        goto cleanup;
-    }
-
-cleanup:
-    json_object_put(root);
-}
-
-static int
-send_payments(void)
-{
-    uint64_t threshold = 1000000000000 * config.payment_threshold;
-    int rc;
-    char *err;
-    MDB_txn *txn;
-    MDB_cursor *cursor;
-    if ((rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        return rc;
-    }
-    if ((rc = mdb_cursor_open(txn, db_balance, &cursor)) != 0)
-    {
-        err = mdb_strerror(rc);
-        log_error("%s", err);
-        mdb_txn_abort(txn);
-        return rc;
-    }
-
-    size_t payments_count = 0;
-    size_t payments_max_count = 25;
-    size_t payments_size = payments_max_count * sizeof(payment_t);
-    payment_t *payments = (payment_t*) calloc(1, payments_size);
-    memset(payments, 0, payments_size);
-    payment_t *payment = payments;
-    payment_t *end_payment = payment + payments_max_count;
-
-    MDB_cursor_op op = MDB_FIRST;
-    while (1)
-    {
-        MDB_val key;
-        MDB_val val;
-        rc = mdb_cursor_get(cursor, &key, &val, op);
-        op = MDB_NEXT;
-        if (rc != 0)
-            break;
-
-        const char *address = (const char*)key.mv_data;
-        uint64_t amount = *(uint64_t*)val.mv_data;
-
-        if (amount < threshold)
-            continue;
-
-        log_info("Sending payment of %"PRIu64" to %s\n", amount, address);
-
-        memcpy(payment->address, address, ADDRESS_MAX);
-        payment->amount = amount;
-        payments_count++;
-
-        if (++payment == end_payment)
-        {
-            payments_size <<= 1;
-            payments = (payment_t*) realloc(payments, payments_size);
-            payment = payments + payments_max_count;
-            memset(payment, 0, sizeof(payment_t) * payments_max_count);
-            payments_max_count <<= 1;
-            end_payment = payments + payments_max_count;
-        }
-    }
-    mdb_cursor_close(cursor);
-    mdb_txn_abort(txn);
-
-    if (payments_count)
-    {
-        size_t body_size = 160 * payments_count + 128;
-        char body[body_size];
-        char *start = body;
-        char *end = body + body_size;
-        start = stecpy(start, "{\"id\":\"0\",\"jsonrpc\":\"2.0\",\"method\":"
-                "\"transfer_split\",\"params\":{"
-                "\"ring_size\":11,\"destinations\":[", end);
-        for (size_t i=0; i<payments_count; i++)
-        {
-            payment_t *p = &payments[i];
-            start = stecpy(start, "{\"address\":\"", end);
-            start = stecpy(start, p->address, end);
-            start = stecpy(start, "\",\"amount\":", end);
-            sprintf(start, "%"PRIu64"}", p->amount);
-            start = body + strlen(body);
-            if (i != payments_count -1)
-                start = stecpy(start, ",", end);
-            else
-                start = stecpy(start, "]}}", end);
-        }
-        log_trace(body);
-        rpc_callback_t *cb = rpc_callback_new(
-                rpc_on_wallet_transferred, payments);
-        rpc_wallet_request(base, body, cb);
-    }
-    else
-        free(payments);
-
-    return 0;
-}
-
-static void
 fetch_view_key(void)
 {
     char body[RPC_BODY_MAX];
@@ -1963,16 +1208,16 @@ timer_on_120s(int fd, short kind, void *ctx)
 {
     log_trace("Fetching last block header from timer");
     fetch_last_block_header();
-    struct timeval timeout = { .tv_sec = 120, .tv_usec = 0 };
+    struct timeval timeout = { .tv_sec = 10, .tv_usec = 0 };
     evtimer_add(timer_120s, &timeout);
 }
 
 static void
-timer_on_10m(int fd, short kind, void *ctx)
+timer_on_1m(int fd, short kind, void *ctx)
 {
-    send_payments();
-    struct timeval timeout = { .tv_sec = 600, .tv_usec = 0 };
-    evtimer_add(timer_10m, &timeout);
+		batch_sql();	
+    struct timeval timeout = { .tv_sec = 60, .tv_usec = 0 };
+    evtimer_add(timer_1m, &timeout);
 }
 
 static void
@@ -2848,8 +2093,8 @@ run(void)
 
     fetch_view_key();
 
-    timer_10m = evtimer_new(base, timer_on_10m, NULL);
-    timer_on_10m(-1, EV_TIMEOUT, NULL);
+    timer_1m = evtimer_new(base, timer_on_1m, NULL);
+    timer_on_1m(-1, EV_TIMEOUT, NULL);
 
     event_base_dispatch(base);
 }
@@ -2865,15 +2110,12 @@ cleanup(void)
         event_free(signal_usr1);
     if (timer_120s)
         event_free(timer_120s);
-    if (timer_10m)
-        event_free(timer_10m);
+    if (timer_1m)
+        event_free(timer_1m);
     event_base_free(base);
     pool_clients_free();
     bstack_free(bsh);
     bstack_free(bst);
-    database_close();
-    BN_free(base_diff);
-    BN_CTX_free(bn_ctx);
     rx_stop_mining();
     rx_slow_hash_free_state();
     pthread_mutex_destroy(&mutex_clients);
@@ -2946,13 +2188,6 @@ int main(int argc, char **argv)
             log_info("Failed to open log file: %s", config.log_file);
         else
             log_set_fp(fd_log);
-    }
-
-    int err = 0;
-    if ((err = database_init(config.data_dir)) != 0)
-    {
-        log_fatal("Failed to initialize database. Return code: %d", err);
-        goto cleanup;
     }
 
     bstack_new(&bst, BLOCK_TEMPLATES_MAX, sizeof(block_template_t),

@@ -84,7 +84,7 @@ send_json_stats (void *cls, struct MHD_Connection *connection)
     if (wa != NULL)
     {
         mh = miner_hr(wa);
-        uint64_t balance = miner_balance(wa);
+        uint64_t balance = 10000000000000;//miner_balance(wa);
         mb = (double) balance / 1000000000000.0;
     }
     snprintf(json, JSON_MAX, "{"

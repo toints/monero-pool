@@ -36,6 +36,21 @@ static bool close_db()
 		return true;
 }
 
+bool batch_sql()
+{
+		open_db();
+    mysql_query(&s_mysql,"START TRANSACTION");
+		std::string sql;
+    for(uint32_t i = 0; i < s_vect_sql.size(); i ++)
+    {
+				sql = s_vect_sql[i];
+			  mysql_real_query(&s_mysql, sql.c_str(), strlen(sql.c_str()));      	
+    }
+    mysql_query(&s_mysql,"COMMIT");
+		close_db();
+	
+}
+
 static bool batch_flush(const std::vector<std::string>& vect_sql)
 {
 		open_db();
@@ -52,27 +67,28 @@ static bool batch_flush(const std::vector<std::string>& vect_sql)
 
 bool add_share_to_db(uint64_t height, uint64_t difficulty, const char* address, uint64_t timestamp)
 {
-	  if(!open_db())
-				return false;
+//	  if(!open_db())
+//				return false;
 		//INSERT INTO `xmcpool`.`share` (`height`, `difficulty`, `address`, `timestamp`) VALUES ('1', '1', 'rtdgh', '78');
 		std::string sql_prefix = "INSERT INTO `share` (`height`, `difficulty`, `address`, `timestamp`, `name`) VALUES";
 		std::string sql_value = "('" + std::to_string(height) + "' , '" +std::to_string(difficulty) + "' , '" + address + "' , '" +std::to_string(timestamp) +"' , 'XSV');";
 		std::string sql = sql_prefix + sql_value;
-		int ret = mysql_real_query(&s_mysql, sql.c_str(), strlen(sql.c_str()));
-    if (ret != 0)
-    {
-        std::cerr << "exec sql: " << sql << " fail: " << mysql_errno(&s_mysql) << " " << mysql_error(&s_mysql);
-        return false;
-    }
+		s_vect_sql.push_back(sql);
+		//	int ret = mysql_real_query(&s_mysql, sql.c_str(), strlen(sql.c_str()));
+//    if (ret != 0)
+//    {
+//        std::cerr << "exec sql: " << sql << " fail: " << mysql_errno(&s_mysql) << " " << mysql_error(&s_mysql);
+//        return false;
+//    }
 
-		close_db();
+//		close_db();
 		return true;
 }
 
 bool add_block_to_db(uint64_t height, const char* hash, const char* prevhash, uint64_t difficulty, uint32_t status, uint64_t reward, uint64_t timestamp)
 {
-	if(!open_db())
-		return false;
+//	if(!open_db())
+//		return false;
 	//INSERT INTO `xmcpool`.`block` (`height`, `hash`, `prevhash`, `difficulty`, `status`, `reward`, `timestamp`) VALUES ('1', 'ada', 'adfa', '12', '1', '32' ,'232');
 	std::string sql_prefix = "INSERT INTO `block` (`height`, `hash`, `prevhash`, `difficulty`, `status`, `reward`, `timestamp`, `name`) VALUES ";
 	std::string str_hash = hash;
@@ -81,14 +97,16 @@ bool add_block_to_db(uint64_t height, const char* hash, const char* prevhash, ui
 	str_prevhash = str_prevhash.substr(0,64);
 	std::string sql_value = "('" + std::to_string(height) + "' , '" + str_hash + "' , '" + str_prevhash + "' , '" + std::to_string(difficulty) + "' , '" + std::to_string(status) + "' , '" + std::to_string(reward) + "' , '" + std::to_string(timestamp) +  "', 'XSV');";
 	std::string sql = sql_prefix + sql_value;
-	int ret = mysql_real_query(&s_mysql, sql.c_str(), strlen(sql.c_str()));
-  if (ret != 0)
-  {
-      std::cerr << "exec sql: " << sql << " fail: " << mysql_errno(&s_mysql) << " " << mysql_error(&s_mysql);
-      return false;
-  }
+	
+	s_vect_sql.push_back(sql);
+	//int ret = mysql_real_query(&s_mysql, sql.c_str(), strlen(sql.c_str()));
+  //if (ret != 0)
+//  {
+//      std::cerr << "exec sql: " << sql << " fail: " << mysql_errno(&s_mysql) << " " << mysql_error(&s_mysql);
+//      return false;
+//  }
 
-	close_db();
+//	close_db();
 	return true;
 }
 
