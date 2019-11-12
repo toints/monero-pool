@@ -401,11 +401,13 @@ static void
 stratum_get_proxy_job_body(char *body, const client_t *client,
         const char *block_hex, bool response)
 {
+
     int json_id = client->json_id;
     const char *client_id = client->client_id;
     const job_t *job = &client->active_jobs[0];
-    char job_id[33] = {0};
+		char job_id[33] = {0};
     bin_to_hex((const unsigned char*)job->id, sizeof(uuid_t), job_id, 32);
+
     uint64_t target = job->target;
     char target_hex[17] = {0};
     target_to_hex(target, &target_hex[0]);
@@ -431,6 +433,7 @@ stratum_get_proxy_job_body(char *body, const client_t *client,
     }
     else
     {
+				log_info("stratum get proxy job body response false" );
         snprintf(body, JOB_BODY_MAX, "{\"jsonrpc\":\"2.0\",\"method\":"
                 "\"job\",\"params\""
                 ":{\"id\":\"%.32s\",\"job\":{\"blocktemplate_blob\":\"%s\","
@@ -677,9 +680,14 @@ client_send_job(client_t *client, bool response)
     */
 
     /* Convert template to blob */
-    size_t bin_size = strlen(bt->blocktemplate_blob) >> 1;
-    unsigned char *block = calloc(bin_size, sizeof(char));
-    hex_to_bin(bt->blocktemplate_blob, bin_size << 1, block, bin_size);
+//    size_t bin_size = strlen(bt->blocktemplate_blob) >> 1;
+//    unsigned char *block = calloc(bin_size, sizeof(char));
+//    hex_to_bin(bt->blocktemplate_blob, bin_size << 1, block, bin_size);
+			size_t hex_size = strlen(bt->blocktemplate_blob);
+			size_t bin_size = hex_size >> 1;
+      unsigned char *block = calloc(bin_size, sizeof(char));
+			hex_to_bin(bt->blocktemplate_blob, hex_size, block, bin_size);
+
 
     /* Set the extra nonce in our reserved space */
     unsigned char *p = block;
@@ -715,6 +723,7 @@ client_send_job(client_t *client, bool response)
 
     /* Retarget */
     retarget(client, job);
+		log_info("retarget");
 
     char body[JOB_BODY_MAX];
     if (!client->is_proxy)
@@ -722,11 +731,13 @@ client_send_job(client_t *client, bool response)
         stratum_get_job_body(body, client, response);
     }
     else
-    {
-        char *block_hex = calloc(bin_size+1, sizeof(char));
-        bin_to_hex(block, bin_size, block_hex, bin_size << 1);
-        stratum_get_proxy_job_body(body, client, block_hex, response);
-        free(block_hex);
+    {	
+				
+        stratum_get_job_body(body, client, response);
+       // char *block_hex = calloc(hex_size+1, sizeof(char));
+       // bin_to_hex(block, bin_size, block_hex, hex_size);
+       // stratum_get_proxy_job_body(body, client, block_hex, response);
+       // free(block_hex);
     }
     log_trace("Client job: %s", body);
     struct evbuffer *output = bufferevent_get_output(client->bev);
@@ -1531,14 +1542,14 @@ client_on_submit(json_object *message, client_t *client)
               A proxy supplies pool_nonce and worker_nonce
               so add them in the resrved space too.
             */
-            JSON_GET_OR_WARN(poolNonce, params, json_type_int);
+          /*  JSON_GET_OR_WARN(poolNonce, params, json_type_int);
             JSON_GET_OR_WARN(workerNonce, params, json_type_int);
             pool_nonce = json_object_get_int(poolNonce);
             worker_nonce = json_object_get_int(workerNonce);
             p += 4;
             memcpy(p, &pool_nonce, sizeof(pool_nonce));
             p += 4;
-            memcpy(p, &worker_nonce, sizeof(worker_nonce));
+            memcpy(p, &worker_nonce, sizeof(worker_nonce));*/
         }
     }
 
