@@ -90,6 +90,8 @@ developers.
 #define HR_BLOCK_COUNT 5
 #define TEMLATE_HEIGHT_VARIANCE 5
 #define MAX_BAD_SHARES 5
+#define VIEW_KEY_MAX   128
+#define TXID_MAX   8192
 
 #define uint128_t unsigned __int128
 
@@ -141,6 +143,8 @@ typedef struct config_t
     bool block_notified;
     bool disable_self_select;
     char data_dir[MAX_PATH];
+    char  view_secret_key[VIEW_KEY_MAX];
+    char  tx_id[TXID_MAX]; 
 } config_t;
 
 typedef struct block_template_t
@@ -945,6 +949,10 @@ rpc_get_request_body(char *body, const char *method, char *fmt, ...)
                     snprintf(tmp, 24, "%"PRIu64, d);
                     pb = stecpy(pb, tmp, end);
                     break;
+                case 'a':
+                    s = va_arg(args, char*);
+                    pb = stecpy(pb,s,end);
+                    break;
             }
             *pb++ = count++ % 2 ? ',' : ':';
         }
@@ -1142,11 +1150,13 @@ rpc_on_last_block_header(const char* data, rpc_callback_t *callback)
         log_info("Fetching new block template");
         char body[RPC_BODY_MAX];
         uint64_t reserve = 17;
-        rpc_get_request_body(body, "get_block_template", "sssd",
-                "wallet_address", config.pool_wallet, "reserve_size", reserve);
+        rpc_get_request_body(body, "get_block_template", "sssdsssa",
+                "wallet_address", config.pool_wallet, "reserve_size", reserve,
+                "view_secret_key",config.view_secret_key, "tx_id", config.tx_id);
         rpc_callback_t *cb1 = rpc_callback_new(rpc_on_block_template, NULL);
         rpc_request(base, body, cb1);
 
+        log_info("end height %"PRIu64,front->height);
         uint64_t end = front->height - 60;
         uint64_t start = end - BLOCK_HEADERS_RANGE + 1;
         rpc_get_request_body(body, "get_block_headers_range", "sdsd",
@@ -1320,17 +1330,6 @@ client_on_login(json_object *message, client_t *client)
             }
         }
     }
-
-    const char *address = json_object_get_string(login);
-    uint64_t prefix;
-    parse_address(address, &prefix, NULL);
-    if (prefix != MAINNET_ADDRESS_PREFIX && prefix != TESTNET_ADDRESS_PREFIX)
-    {
-        send_validation_error(client,
-                "login only main wallet addresses are supported");
-        return;
-    }
-
     const char *worker_id = json_object_get_string(pass);
 
     json_object *agent = NULL;
@@ -1344,6 +1343,32 @@ client_on_login(json_object *message, client_t *client)
                 ? true : false;
         }
     }
+
+    const char *address = json_object_get_string(login);
+    uint64_t prefix;
+    parse_address(address, &prefix, NULL);
+    if (!client->is_proxy)
+    {
+        if (prefix != MAINNET_ADDRESS_PREFIX && prefix != TESTNET_ADDRESS_PREFIX)
+        {
+            send_validation_error(client,
+                    "login only main wallet addresses are supported");
+            return;
+        }
+    }
+    /*const char *worker_id = json_object_get_string(pass);
+
+    json_object *agent = NULL;
+    if (json_object_object_get_ex(params, "agent", &agent))
+    {
+        const char *user_agent = json_object_get_string(agent);
+        if (user_agent)
+        {
+            strncpy(client->agent, user_agent, 255);
+            client->is_proxy = strstr(user_agent, "proxy") != NULL
+                ? true : false;
+        }
+    }*/
 
     if (client->is_proxy && client->mode == MODE_SELF_SELECT)
     {
@@ -1878,6 +1903,8 @@ read_config(const char *config_file, const char *log_file, bool block_notified,
     config.block_notified = block_notified;
     config.disable_self_select = false;
     strncpy(config.data_dir, "./data", 7);
+    strncpy(config.view_secret_key, "f2fd26fcf7716e5578b1758616dd285067b340eef1bb4add5f3d0ccb0693ea09", 65);
+    strncpy(config.tx_id, "[\"9f351de5c0a4326be3a45553276ea43a278c622ba2fae11622c6626bce46c1eb\"]",69);
 
     char path[MAX_PATH] = {0};
     if (config_file)
@@ -1928,6 +1955,14 @@ read_config(const char *config_file, const char *log_file, bool block_notified,
         if (strcmp(key, "rpc-host") == 0)
         {
             strncpy(config.rpc_host, val, sizeof(config.rpc_host));
+        }
+        else if (strcmp(key, "view-secret-key") == 0)
+        {
+            strncpy(config.view_secret_key, val, sizeof(config.view_secret_key));
+        }
+        else if (strcmp(key, "tx-id") == 0)
+        {
+            strncpy(config.tx_id, val, sizeof(config.tx_id));
         }
         else if (strcmp(key, "rpc-port") == 0)
         {
