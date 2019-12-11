@@ -1939,7 +1939,7 @@ read_config(const char *config_file, const char *log_file, bool block_notified,
         log_fatal("Cannot open config file. Aborting.");
         abort();
     }
-    char line[256];
+    char line[1024];
     char *key;
     char *val;
     const char *tok = " =";
